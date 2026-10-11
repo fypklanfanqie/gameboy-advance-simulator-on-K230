@@ -1,0 +1,50 @@
+# User games and persistent data
+*.gba
+*.gb
+*.gbc
+*.sav
+*.state
+*.srm
+roms/
+saves/
+
+# Local SDKs, generated artifacts and diagnostics
+_local/
+logs/
+output/
+build/
+sdk/
+*.img
+*.img.gz
+*.vhd
+*.vhdx
+*.elf
+*.elf.gz
+*.bin
+*.o
+*.a
+*.so
+*.exe
+*.dll
+*.log
+*.bak
+*.backup
+*.before-*
+
+# Python and editor environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Credentials and private configuration
+.env
+.env.*
+*.pem
+*.key
+credentials*
+secrets*

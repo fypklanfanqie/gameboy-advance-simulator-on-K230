@@ -1,0 +1,32 @@
+diff --git a/port/Makefile b/port/Makefile
+index 8f1a0d2..b3c7deb 100644
+--- a/port/Makefile
++++ b/port/Makefile
+@@ -70,6 +70,8 @@ INC += -Iomv/imlib
+ INC += -Iomv/modules
+ INC += -I3rd-party/ulab
+ INC += -I3rd-party/lv_bindings
++INC += -Igba/include/include
++INC += -Igba/core
+ INC += -I$(SDK_RTSMART_SRC_DIR)/mpp/middleware/src/rtsp_server/include
+ INC += -I$(SDK_RTSMART_SRC_DIR)/mpp/middleware/src/mp4_format/include
+ INC += -I$(SDK_RTSMART_SRC_DIR)/mpp/middleware/src/ogg/include
+@@ -108,6 +110,7 @@ CFLAGS += -std=gnu99 $(COPT) $(CWARN) $(CFLAGS_EXTRA) $(CDEF) $(CFLAGS_MBEDTLS)
+ 
+ # Workaround gcc 12 bug.
+ CFLAGS += -Wno-array-bounds
++CFLAGS += -DCOLOR_16_BIT -DCOLOR_5_6_5
+ 
+ ifeq ($(MICROPY_PY_TERMIOS),1)
+ CFLAGS += -DMICROPY_PY_TERMIOS=1
+@@ -187,6 +190,10 @@ CANMV_SRC_C += $(wildcard omv/*/*.c)
+ CANMV_SRC_C += $(wildcard multi_media/*.c)
+ # drivers
+ CANMV_SRC_C += $(wildcard drivers/*.c)
++# GBA emulator (mGBA software renderer and MicroPython binding)
++CANMV_SRC_C += $(wildcard gba/*.c)
++CANMV_SRC_C += $(wildcard gba/core/*/*.c)
++CANMV_SRC_C += $(wildcard gba/core/*/*/*.c)
+ # modules
+ CANMV_SRC_C += $(wildcard modules/*.c)
+ 

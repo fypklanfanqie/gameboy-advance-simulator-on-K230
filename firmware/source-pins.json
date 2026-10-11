@@ -1,0 +1,18 @@
+{
+  ".": "44b88b30f3c0dc418c146346e292e5ef7334a7c9",
+  "src/canmv": "f57cc2c426e92d21f96623116db4d5edec169b00",
+  "src/canmv/micropython": "0295137e60c0de862c8ee72d81c88d9e57e3973b",
+  "src/canmv/micropython/lib/micropython-lib": "e025c843b60e93689f0f991d753010bb5bd6a722",
+  "src/canmv/port/3rd-party/lv_bindings/lvgl": "1bfdecf585bb50fbb22ed1c38450b5c9eb600196",
+  "src/canmv/port/3rd-party/lv_bindings/pycparser": "3cf6bf5eb16f5eadd4a058e41596145c407a79ad",
+  "src/rtsmart/mpp": "a7cde9c66e3647d333cf4ecdb2f86e8db704142e",
+  "src/rtsmart/rtsmart": "e6dc5d30528168ebc55840e4b15aaf5383c5daeb",
+  "src/rtsmart/libs": "f38b53083ea1518af468d871a079ca00f7703472",
+  "src/rtsmart/libs/3rd-party/freetype/freetype": "1452355de99d22b0cba6ccc17bf5cdf3682ef61e",
+  "src/rtsmart/libs/3rd-party/mbedtls/mbedtls": "a3ff9bce6b1c554a91bb3ced0f83046442a1694c",
+  "src/rtsmart/libs/3rd-party/mqttclient/mqttclient": "956e0c8dcac02d4b107ccb49f1990c7718b6b585",
+  "src/rtsmart/libs/3rd-party/lvgl/lvgl": "e9db313f8ccc07e27f6afd0f34fe3cf6f20596f0",
+  "src/rtsmart/examples": "e2c540860f9ca21ade8ae2c88a217c253c33291d",
+  "src/opensbi/opensbi": "fc14caa9cd38c22d43652e43b386c6f949754b3b",
+  "src/uboot/uboot": "d4a377f8ca6c788ca98a0ca24a4d1f4d881914a4"
+}
