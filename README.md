@@ -4,9 +4,8 @@
 
 项目把模拟器编入 CanMV **用户态 RTAPP**，沿用匹配版本的厂商 RT-Smart 内核和显示驱动。现有板卡曾测得约 9.7 FPS；分段计时定位并优化后，连续 840 帧日志窗口为 60.1–60.2 FPS，接近 GBA 的 59.7275 Hz。实际表现随游戏场景、板型和固件版本变化，详见[验证记录](docs/validation.md)。
 
-![半透明触摸六键布局示意](docs/virtual-controls-preview.png)
+<img width="4096" height="3072" alt="IMG_20261013_171556" src="https://github.com/user-attachments/assets/ddb5f0ed-2293-4e21-8bd7-089489041745" />
 
-上图由实际 UI 绘图函数生成；背景是工具绘制的原创示意场景，并非游戏截图。
 
 ## 硬件与接线
 
