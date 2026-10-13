@@ -114,10 +114,12 @@ FRAME_MS = 1000.0 / TARGET_FPS          # ≈16.74 ms
 MAX_CATCHUP_MS = 100
 
 # 帧率日志间隔（帧）
-FPS_LOG_EVERY = 120
-# 每约2秒检查一次存档；内容未变不改写卡。忙/失败后半秒重试。
+FPS_LOG_EVERY = 600
+# 每约2秒在内存检查存档；内容未变不访问卡。忙/失败后半秒重试。
 SAVE_EVERY_FRAMES = 120
 SAVE_RETRY_FRAMES = 30
+SAVE_LEGACY_FRAMES = 1800
+_save_committed = None
 
 # 显示缓冲尺寸、布局参数与按键区域都来自 gba_ui（见上面的 import）。
 
@@ -415,6 +417,7 @@ def save_if_idle(gba, tag):
     FAT不支持rename覆盖已有目标，必须显式轮换，并在提交失败时还原旧档。
     这与 mGBA 自己判断"忙"用的是同一个条件（mTimingIsScheduled(dust)）。
     """
+    global _save_committed
     try:
         busy = gba.save_busy()
         if busy != 0:
@@ -430,7 +433,23 @@ def save_if_idle(gba, tag):
     backup = SAVE_PATH + ".bak"
     rotated = False
     try:
-        n = gba.save_write(temporary)
+        snapshot_fn = getattr(gba, "save_snapshot", None)
+        snapshot = None
+        if snapshot_fn is not None:
+            snapshot = snapshot_fn()
+            if not isinstance(snapshot, bytes) or not snapshot:
+                raise OSError("save_snapshot failed")
+            expected_size = getattr(gba, "save_size", None)
+            if expected_size is not None and len(snapshot) != expected_size():
+                raise OSError("save_snapshot size differs from core")
+            if snapshot == _save_committed:
+                return len(snapshot)
+            with open(temporary, "wb") as stream:
+                n = stream.write(snapshot)
+            if n != len(snapshot):
+                raise OSError("save snapshot short write")
+        else:
+            n = gba.save_write(temporary)
         if not isinstance(n, int) or n <= 0:
             raise OSError("save_write failed: %r" % (n,))
         expected_size = getattr(gba, "save_size", None)
@@ -439,6 +458,7 @@ def save_if_idle(gba, tag):
         _verify_save_file(temporary, n)
         if _save_files_equal(temporary, SAVE_PATH):
             os.remove(temporary)
+            _save_committed = snapshot
             return n
         if _save_exists(SAVE_PATH):
             if _save_exists(backup):
@@ -447,6 +467,7 @@ def save_if_idle(gba, tag):
             rotated = True
         os.rename(temporary, SAVE_PATH)
         _verify_save_file(SAVE_PATH, n)
+        _save_committed = snapshot
         log("存档提交并读回成功（%s）: %d bytes，上一版保留.bak" % (tag, n))
         return n
     except Exception as e:
@@ -484,6 +505,8 @@ def run_emulator(gba):
 
 
 def _run_emulator(gba, inp):
+    global _save_committed
+    _save_committed = None
 
     # ---- 音频（可失败）----
     # 必须在 init_display()（内部会 MediaManager.init()）之后创建：
@@ -529,6 +552,12 @@ def _run_emulator(gba, inp):
             if not isinstance(n, int) or n <= 0:
                 raise OSError("save_load failed: %r" % (n,))
             log("存档恢复: %d bytes (%s)" % (n, load_path))
+            if load_path == SAVE_PATH and getattr(gba, "save_snapshot", None) is not None:
+                with open(load_path, "rb") as stream:
+                    restored = stream.read()
+                if len(restored) != n:
+                    raise OSError("save cache short read")
+                _save_committed = restored
     except Exception as e:
         log("存档恢复失败，停止启动以保护已有进度: %r" % e)
         gba.unload()
@@ -606,7 +635,11 @@ def _run_emulator(gba, inp):
     volume_horizontal_mask = (1 << 4) | (1 << 5)
     volume_x_dir = 0
     volume_next_repeat = volume_last_activity
-    next_save_frame = SAVE_EVERY_FRAMES
+    save_interval = SAVE_EVERY_FRAMES
+    if save_interval and getattr(gba, "save_snapshot", None) is None:
+        save_interval = max(save_interval, SAVE_LEGACY_FRAMES)
+        log("固件没有内存存档快照，使用约30秒保存周期以减少写卡停顿")
+    next_save_frame = save_interval
     try:
         while True:
             if profiling:
@@ -768,9 +801,9 @@ def _run_emulator(gba, inp):
                     prof_work_us = 0
                 fps_t0 = time.ticks_ms()
 
-            if SAVE_EVERY_FRAMES and frame >= next_save_frame:
+            if save_interval and frame >= next_save_frame:
                 saved = save_if_idle(gba, "定期")
-                next_save_frame = frame + (SAVE_EVERY_FRAMES if saved is not None
+                next_save_frame = frame + (save_interval if saved is not None
                                            else SAVE_RETRY_FRAMES)
 
     except KeyboardInterrupt:

@@ -28,7 +28,7 @@ python3 tools/check_source_pins.py --sdk /path/to/k230-sdk
 SDK_PATH=/path/to/k230-sdk bash tools/wsl/install_and_build.sh
 ```
 
-安装脚本先检查版本，再复制公开的 `firmware/gba/`，应用 CanMV Makefile 集成补丁，安装异步触摸绑定与 mGBA 优化标志，构建 CanMV 用户态。触摸原始基线和修改后的绑定同时保留，安装器核对哈希并备份厂商原文件。`-O3` 限定于 mGBA 核心；eReader 源码保留 `-Os`。脚本不写 TF 卡、不替换厂商内核。
+安装脚本先检查版本，再复制公开的 `firmware/gba/`，应用 CanMV Makefile 集成补丁，安装异步触摸绑定与 mGBA 优化标志，构建 CanMV 用户态。触摸原始基线和修改后的绑定同时保留，安装器核对哈希并备份厂商原文件。`-O3` 限定于 mGBA 核心；eReader 源码保留 `-Os`。核心同时定义 `HAVE_LOCALTIME_R=1`，避免占位函数覆盖 musl 的真实日期转换。安装器升级旧标志块后会触碰核心源码，确保 make 重编译；未知改动则拒绝覆盖。脚本不写 TF 卡、不替换厂商内核。
 
 ## RTAPP 打包
 

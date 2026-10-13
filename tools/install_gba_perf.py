@@ -9,12 +9,18 @@ BEGIN = '# BEGIN POKEMO MGBA PERF FLAGS'
 END = '# END POKEMO MGBA PERF FLAGS'
 BLOCK = '''# BEGIN POKEMO MGBA PERF FLAGS
 # Keep CanMV and the MicroPython binding at their vendor optimization level.
-$(filter $(BUILD)/gba/core/%,$(OBJ)): CFLAGS += -O3
+# musl provides localtime_r; do not link mGBA's no-op fallback.
+$(filter $(BUILD)/gba/core/%,$(OBJ)): CFLAGS += -O3 -DHAVE_LOCALTIME_R=1
 # eReader conditional-header code retains the vendor optimization level.
 $(BUILD)/gba/core/gba/cart/ereader.o: CFLAGS += -Os
+# hle-bios.s is guest ARM code; compile its pre-generated C byte array.
+$(BUILD)/gba/core/gba/hle-bios.o: gba/core/gba/hle-bios.c
+	$(call compile_c)
 # END POKEMO MGBA PERF FLAGS
 '''
-PREVIOUS_BLOCK = BLOCK.replace('# eReader conditional-header code retains the vendor optimization level.\n$(BUILD)/gba/core/gba/cart/ereader.o: CFLAGS += -Os\n', '')
+RTC_BLOCK = BLOCK.replace('# hle-bios.s is guest ARM code; compile its pre-generated C byte array.\n$(BUILD)/gba/core/gba/hle-bios.o: gba/core/gba/hle-bios.c\n\t$(call compile_c)\n', '')
+OLD_BLOCK = RTC_BLOCK.replace("# musl provides localtime_r; do not link mGBA's no-op fallback.\n", '').replace(' -DHAVE_LOCALTIME_R=1', '')
+PREVIOUS_BLOCK = OLD_BLOCK.replace('# eReader conditional-header code retains the vendor optimization level.\n$(BUILD)/gba/core/gba/cart/ereader.o: CFLAGS += -Os\n', '')
 OPTIMIZATION_EXCEPTIONS = {'gba/core/gba/cart/ereader.o': '-Os'}
 LOG_VENDOR_SHA256 = '4e5ec86ac64bdd32b5829b9b7adf49403e1abc0a95fcab7edf7c727e823bc5c1'
 LOG_OLD = '\t\tchar configName[128] = {0};\n\t\tsnprintf(configName, sizeof(configName) - 1, "logLevel.%s", mLogCategoryId(i));'
@@ -69,9 +75,9 @@ def main():
     flags_changed = BEGIN not in source
     if BEGIN in source:
         old = source[source.index(BEGIN):source.index(END) + len(END)] + '\n'
-        if old == PREVIOUS_BLOCK:
+        if old in (PREVIOUS_BLOCK, OLD_BLOCK, RTC_BLOCK):
             makefile.write_text(source.replace(old, BLOCK), newline='\n')
-            os.utime(port / 'gba/core/gba/cart/ereader.c', None)
+            flags_changed = True
         elif old != BLOCK:
             raise RuntimeError('Existing mGBA flags block differs; refusing overwrite')
     else:
@@ -93,7 +99,8 @@ def main():
     core_patches.update(install_core_guard(port, 'util/string.c', STRING_VENDOR_SHA256, STRING_OLD, STRING_NEW))
     print('mGBA -O3 installed; touched', count, 'core source files')
     manifest = {'makefile_sha256': hashlib.sha256(makefile.read_bytes()).hexdigest(),
-                'scoped_flag': '-O3', 'block': BLOCK, 'touched_sources': count, 'core_patches': core_patches,
+                'scoped_flag': '-O3', 'feature_defines': ['HAVE_LOCALTIME_R=1'],
+                'block': BLOCK, 'touched_sources': count, 'core_patches': core_patches,
                 'optimization_exceptions': OPTIMIZATION_EXCEPTIONS}
     (port / 'gba/perf-flags-installed.json').write_text(json.dumps(manifest, indent=2) + '\n')
 

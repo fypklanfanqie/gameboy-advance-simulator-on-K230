@@ -16,7 +16,7 @@ mapfile -d '' SOURCES < <(find "$G/core" -name '*.c' \
   ! -path '*/third-party/inih/src/tests/*' \
   ! -path '*/third-party/inih/src/fuzzing/*' \
   ! -path '*/third-party/inih/ini.c' -print0)
-"$CC_BIN" -O1 -g -std=gnu99 -D_GNU_SOURCE -DCOLOR_16_BIT -DCOLOR_5_6_5 \
+"$CC_BIN" -O1 -g -std=gnu99 -D_GNU_SOURCE -DCOLOR_16_BIT -DCOLOR_5_6_5 -DHAVE_LOCALTIME_R=1 \
   -I"$G/include/include" -I"$G/core" -ffunction-sections -fdata-sections \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function \
@@ -28,7 +28,7 @@ IFS=',' read -ra FRAMES <<< "$BUDGETS"
 for frames in "${FRAMES[@]}"; do
   log="$OUT/core-$frames.log"
   set +e
-  ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=0 \
+  TZ=UTC ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=0 \
     "$OUT/host_gba_test" "$ROM" "$frames" >"$log" 2>&1
   rc=$?
   set -e

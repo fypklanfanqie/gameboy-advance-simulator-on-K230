@@ -218,9 +218,10 @@ STATIC mp_obj_t gba_load(mp_obj_t path) {
        所以必须在 init() 之后调用。 */
     mCoreConfigSetDefaultIntValue(&s_core->config, "volume", GBA_AUDIO_VOLUME_MAX);
     mCoreConfigSetDefaultIntValue(&s_core->config, "audioBuffers", GBA_AUDIO_SAMPLES);
-    /* ROM hacks can bypass the fixed-address overrides. Let mGBA verify an
-       idle loop from actual instructions instead of assuming a stock address. */
-    mCoreConfigSetDefaultValue(&s_core->config, "idleOptimization", "detect");
+    /* Preserve all emulated instructions during compatibility testing.
+       The confirmed outdoor flicker fix is native localtime_r in the core's
+       build flags; idle-detection comparisons alone did not prove a cause. */
+    mCoreConfigSetDefaultValue(&s_core->config, "idleOptimization", "ignore");
     mCoreLoadForeignConfig(s_core, &s_core->config);
 
     /* 渲染目标：必须在 reset() 之前设置，_GBACoreReset 用它选择软件渲染器 */
@@ -480,6 +481,22 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(gba_audio_frame_obj, gba_audio_frame);
 // ==================================================================
 
 // gba.save_write(path) -> 写入字节数，负数=错误
+// gba.save_snapshot() -> immutable battery-save bytes; no card I/O.
+STATIC mp_obj_t gba_save_snapshot(void) {
+    if (!s_core || !s_core_inited) {
+        return mp_obj_new_int(-1);
+    }
+    void* buf = NULL;
+    size_t size = s_core->savedataClone(s_core, &buf);
+    if (!size || !buf) {
+        return mp_obj_new_int(-2);
+    }
+    mp_obj_t result = mp_obj_new_bytes(buf, size);
+    free(buf);
+    return result;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(gba_save_snapshot_obj, gba_save_snapshot);
+
 STATIC mp_obj_t gba_save_write(mp_obj_t path) {
     if (!s_core || !s_core_inited) {
         return mp_obj_new_int(-1);
@@ -811,6 +828,7 @@ STATIC const mp_rom_map_elem_t gba_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_audio_rate), MP_ROM_PTR(&gba_set_audio_rate_obj) },
 
     /* 电池存档 */
+    { MP_ROM_QSTR(MP_QSTR_save_snapshot), MP_ROM_PTR(&gba_save_snapshot_obj) },
     { MP_ROM_QSTR(MP_QSTR_save_write), MP_ROM_PTR(&gba_save_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_save_load), MP_ROM_PTR(&gba_save_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_save_type), MP_ROM_PTR(&gba_save_type_obj) },

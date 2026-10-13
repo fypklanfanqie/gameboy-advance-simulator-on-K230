@@ -118,7 +118,7 @@
   "gba/core/util/vfs/vfs-fifo.c": "5e9515e0b98bf12f9e2c90aa46406a7911cd15a319151f62028fa74ff41f5c87",
   "gba/core/util/vfs/vfs-file.c": "4f1267416f75e10af2474ab06d52ffd339fbdb669c53b900d0a25dad8142aa46",
   "gba/core/util/vfs/vfs-mem.c": "1365f822040c899d225179ba2847eabc6981f16b8c5016fc216eba44d31a3646",
-  "gba/gba_module.c": "987eb4e66f728be44d855589aedd6506cd6f94ab3d1f3bf1b4f796835ce9ff67",
+  "gba/gba_module.c": "863a77238235a082f22cb602eb9e3da327105643cd001b06e0551470bd7340a7",
   "gba/gba_scale.c": "1a08bf72c908142d5b96e050a91adec5bbd6fb32a4e8f9793932e9ccc876f093",
   "gba/gba_scale.h": "e1aa3d5445e462deaad3a38836ef9e7060aeed5a6a38e5aa2b3208b2d01b182a",
   "gba/hello.c": "1a1ac3eb9fcc0933f9943121801f406a9350cff59d6547e57511dd0a54a8780a",

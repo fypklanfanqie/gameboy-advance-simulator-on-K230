@@ -31,6 +31,19 @@
 #include <mgba/internal/gba/audio.h>
 #include <mgba/internal/gba/input.h>
 #include <mgba/internal/gba/savedata.h>
+/* Send the real cartridge RTC date/time command, least-significant bit first. */
+static void latch_rtc(struct GBACartridgeHardware* hw) {
+    GBAHardwareGPIOWrite(hw, GPIO_REG_CONTROL, 1);
+    GBAHardwareGPIOWrite(hw, GPIO_REG_DIRECTION, 7);
+    GBAHardwareGPIOWrite(hw, GPIO_REG_DATA, 1);
+    GBAHardwareGPIOWrite(hw, GPIO_REG_DATA, 5);
+    for (int bit = 0; bit < 8; bit++) {
+        uint16_t data = ((0xA6 >> bit) & 1) << 1;
+        GBAHardwareGPIOWrite(hw, GPIO_REG_DATA, 4 | data);
+        GBAHardwareGPIOWrite(hw, GPIO_REG_DATA, 5 | data);
+    }
+    GBAHardwareGPIOWrite(hw, GPIO_REG_DATA, 1);
+}
 
 #define GBA_FB_W 240
 #define GBA_FB_H 160
@@ -149,7 +162,7 @@ int main(int argc, char** argv) {
        Give sane defaults, then map them in (this dereferences core->board). */
     mCoreConfigSetDefaultIntValue(&core->config, "volume", GBA_AUDIO_VOLUME_MAX);
     mCoreConfigSetDefaultIntValue(&core->config, "audioBuffers", GBA_AUDIO_SAMPLES);
-    mCoreConfigSetDefaultValue(&core->config, "idleOptimization", "detect");
+    mCoreConfigSetDefaultValue(&core->config, "idleOptimization", "ignore");
     mCoreLoadForeignConfig(core, &core->config);
     check(1, "defaults applied + mCoreLoadForeignConfig after init");
 
@@ -175,6 +188,36 @@ int main(int argc, char** argv) {
     }
     core->reset(core);
     check(1, "core->reset completes");
+
+    section("1b. RTC: native calendar conversion and cartridge BCD");
+    {
+        time_t epoch = 1709210096; /* 2024-02-29 12:34:56 UTC, Thursday */
+        struct tm calendar;
+        memset(&calendar, 0xA5, sizeof(calendar));
+        check(localtime_r(&epoch, &calendar) == &calendar,
+              "localtime_r fills the caller buffer (no fallback stub)");
+        check(calendar.tm_year == 124 && calendar.tm_mon == 1 &&
+              calendar.tm_mday == 29 && calendar.tm_hour == 12 &&
+              calendar.tm_min == 34 && calendar.tm_sec == 56 &&
+              calendar.tm_wday == 4, "native RTC calendar matches fixed leap-day epoch");
+        enum mRTCGenericType old_override = core->rtc.override;
+        int64_t old_value = core->rtc.value;
+        core->rtc.override = RTC_FIXED;
+        core->rtc.value = (int64_t)epoch * 1000;
+        uint16_t gpio_bytes[3] = {0};
+        struct GBACartridgeHardware hw = {.p = gba};
+        GBAHardwareInit(&hw, gpio_bytes);
+        GBAHardwareInitRTC(&hw);
+        latch_rtc(&hw);
+        const uint8_t expected[] = {0x24, 0x02, 0x29, 0x04, 0x12, 0x34, 0x56};
+        check(!memcmp(hw.rtc.time, expected, sizeof(expected)),
+              "cartridge RTC emits correct year/month/day and time BCD");
+        latch_rtc(&hw);
+        check(!memcmp(hw.rtc.time, expected, sizeof(expected)),
+              "repeat RTC latch is deterministic");
+        core->rtc.override = old_override;
+        core->rtc.value = old_value;
+    }
 
     /* ---------- 2. the emulator actually executes the game ---------- */
     section("2. emulation: frames run and the framebuffer changes");
@@ -230,8 +273,8 @@ int main(int argc, char** argv) {
     uint32_t core_frames = core->frameCounter(core);
     printf("  idle loop=0x%08x mode=%d suppressed logs=%llu\n",
            gba->idleLoop, gba->idleOptimization, g_log_suppressed);
-    check(gba->idleOptimization >= IDLE_LOOP_REMOVE || gba->idleOptimization == IDLE_LOOP_IGNORE,
-          "idle detector finishes safely or remains active");
+    check(gba->idleOptimization == IDLE_LOOP_IGNORE,
+          "ROM instructions remain active (unsafe idle skipping disabled)");
     printf("  core frameCounter=%u, distinct framebuffers=%d\n",
            core_frames, distinct);
     check(core_frames > 0, "the core's frame counter advances (emulation runs)");
