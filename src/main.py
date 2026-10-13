@@ -115,8 +115,9 @@ MAX_CATCHUP_MS = 100
 
 # 帧率日志间隔（帧）
 FPS_LOG_EVERY = 120
-# 每隔多少帧把电池存档写盘一次（0=只在退出时写）
-SAVE_EVERY_FRAMES = 1800
+# 每约2秒检查一次存档；内容未变不改写卡。忙/失败后半秒重试。
+SAVE_EVERY_FRAMES = 120
+SAVE_RETRY_FRAMES = 30
 
 # 显示缓冲尺寸、布局参数与按键区域都来自 gba_ui（见上面的 import）。
 
@@ -360,6 +361,43 @@ def selftest():
 # ==================================================================
 # 模拟器主循环
 # ==================================================================
+def _save_exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError as e:
+        if e.args and e.args[0] == 2:
+            return False
+        raise
+
+
+def _save_files_equal(first, second):
+    if not _save_exists(second):
+        return False
+    with open(first, "rb") as left, open(second, "rb") as right:
+        while True:
+            a = left.read(4096)
+            b = right.read(4096)
+            if a != b:
+                return False
+            if not a:
+                return True
+
+
+def _verify_save_file(path, size):
+    if os.stat(path)[6] != size:
+        raise OSError("save size mismatch")
+    total = 0
+    with open(path, "rb") as stream:
+        while True:
+            block = stream.read(4096)
+            if not block:
+                break
+            total += len(block)
+    if total != size:
+        raise OSError("save short readback")
+
+
 def save_if_idle(gba, tag):
     """安全落盘电池存档。
 
@@ -372,21 +410,53 @@ def save_if_idle(gba, tag):
     savedata.data 处于"半写"状态（例如整扇区已被填成 0xFF、新数据还没写回）。
     此刻抓快照就可能把半成品存进 .sav，覆盖掉用户的有效进度。
 
-    所以先查 gba.save_busy()：忙着就跳过这一轮，下一轮再存。
+    所以先查 gba.save_busy()：忙着就跳过这一轮，半秒后重试。
+    先写.tmp并读回，旧文件移动到.bak，再提交.tmp；不直接截断有效旧档。
+    FAT不支持rename覆盖已有目标，必须显式轮换，并在提交失败时还原旧档。
     这与 mGBA 自己判断"忙"用的是同一个条件（mTimingIsScheduled(dust)）。
     """
     try:
-        if gba.save_busy() == 1:
-            log("存档正忙（%s），跳过本次保存" % tag)
+        busy = gba.save_busy()
+        if busy != 0:
+            log("存档正忙或状态异常（%s）: %s，稍后重试" % (tag, busy))
             return None
-    except Exception:
+    except AttributeError:
         # 老固件没有这个函数时不阻塞保存
         pass
+    except Exception as e:
+        log("存档忙状态读取失败（%s）: %r" % (tag, e))
+        return None
+    temporary = SAVE_PATH + ".tmp"
+    backup = SAVE_PATH + ".bak"
+    rotated = False
     try:
-        n = gba.save_write(SAVE_PATH)
-        log("存档已保存（%s）: %s" % (tag, n))
+        n = gba.save_write(temporary)
+        if not isinstance(n, int) or n <= 0:
+            raise OSError("save_write failed: %r" % (n,))
+        expected_size = getattr(gba, "save_size", None)
+        if expected_size is not None and n != expected_size():
+            raise OSError("save_write size differs from core")
+        _verify_save_file(temporary, n)
+        if _save_files_equal(temporary, SAVE_PATH):
+            os.remove(temporary)
+            return n
+        if _save_exists(SAVE_PATH):
+            if _save_exists(backup):
+                os.remove(backup)
+            os.rename(SAVE_PATH, backup)
+            rotated = True
+        os.rename(temporary, SAVE_PATH)
+        _verify_save_file(SAVE_PATH, n)
+        log("存档提交并读回成功（%s）: %d bytes，上一版保留.bak" % (tag, n))
         return n
     except Exception as e:
+        if rotated:
+            try:
+                if _save_exists(SAVE_PATH):
+                    os.remove(SAVE_PATH)
+                os.rename(backup, SAVE_PATH)
+            except Exception as restore_error:
+                log("存档回滚失败，保留.bak请勿删除: %r" % restore_error)
         log("存档保存失败（%s）: %r" % (tag, e))
         return None
 
@@ -443,13 +513,26 @@ def _run_emulator(gba, inp):
     except Exception as e:
         log("读取存档类型失败: %r" % e)
 
-    # ---- 恢复存档（失败不致命） ----
+    # ---- 恢复存档（已有文件恢复失败时停止，避免覆盖旧进度） ----
     # 必须在 load() 之后：reset() 里才会按 game code 定出类型并分配存档缓冲。
     try:
-        n = gba.save_load(SAVE_PATH)
-        log("存档恢复: %s" % n)
+        load_path = SAVE_PATH
+        if not _save_exists(load_path):
+            if _save_exists(SAVE_PATH + ".bak"):
+                load_path = SAVE_PATH + ".bak"
+            else:
+                load_path = None
+        if load_path is None:
+            log("没有已有存档，开始新游戏")
+        else:
+            n = gba.save_load(load_path)
+            if not isinstance(n, int) or n <= 0:
+                raise OSError("save_load failed: %r" % (n,))
+            log("存档恢复: %d bytes (%s)" % (n, load_path))
     except Exception as e:
-        log("存档恢复失败（继续）: %r" % e)
+        log("存档恢复失败，停止启动以保护已有进度: %r" % e)
+        gba.unload()
+        return
 
     # ---- 显示 ----
     scale, off_x, off_y, disp_x, disp_y = layout_params()
@@ -523,6 +606,7 @@ def _run_emulator(gba, inp):
     volume_horizontal_mask = (1 << 4) | (1 << 5)
     volume_x_dir = 0
     volume_next_repeat = volume_last_activity
+    next_save_frame = SAVE_EVERY_FRAMES
     try:
         while True:
             if profiling:
@@ -684,8 +768,10 @@ def _run_emulator(gba, inp):
                     prof_work_us = 0
                 fps_t0 = time.ticks_ms()
 
-            if SAVE_EVERY_FRAMES and frame % SAVE_EVERY_FRAMES == 0:
-                save_if_idle(gba, "定期")
+            if SAVE_EVERY_FRAMES and frame >= next_save_frame:
+                saved = save_if_idle(gba, "定期")
+                next_save_frame = frame + (SAVE_EVERY_FRAMES if saved is not None
+                                           else SAVE_RETRY_FRAMES)
 
     except KeyboardInterrupt:
         log("用户停止")
@@ -697,14 +783,18 @@ def _run_emulator(gba, inp):
                 audio.deinit()
             except Exception:
                 pass
-        # 退出时先等存档不忙再写，避免把半写状态存盘
+        # 忙状态依赖模拟定时器；真实时间sleep不会推进它，需要继续模拟。
         for _try in range(120):
             try:
                 if gba.save_busy() != 1:
                     break
             except Exception:
                 break
-            time.sleep_ms(16)
+            try:
+                gba.run_frame()
+            except Exception as e:
+                log("退出时等待存档完成失败: %r" % e)
+                break
         save_if_idle(gba, "退出")
         try:
             gba.unload()

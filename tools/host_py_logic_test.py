@@ -22,6 +22,7 @@ import re
 import sys
 import types
 import weakref
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -881,15 +882,26 @@ def test_save_guard():
 
         def save_write(self, path):
             self.writes += 1
+            Path(path).write_bytes(b"a" * 131072)
             return 131072
 
     busy = FakeGBA(True)
     mod.save_if_idle(busy, "test")
     check(busy.writes == 0, "busy flash => save_write is NOT called")
 
-    idle = FakeGBA(False)
-    mod.save_if_idle(idle, "test")
-    check(idle.writes == 1, "idle flash => save_write IS called once")
+    with tempfile.TemporaryDirectory() as directory:
+        mod.SAVE_PATH = str(Path(directory) / "game.sav")
+        Path(mod.SAVE_PATH).write_bytes(b"old")
+        idle = FakeGBA(False)
+        check(mod.save_if_idle(idle, "test") == 131072 and idle.writes == 1,
+              "idle flash => verified temporary snapshot replaces old save")
+        check(Path(mod.SAVE_PATH).read_bytes() == b"a" * 131072 and
+              Path(mod.SAVE_PATH + ".bak").read_bytes() == b"old",
+              "successful replacement preserves previous save backup")
+        check(mod.save_if_idle(idle, "unchanged") == 131072 and
+              Path(mod.SAVE_PATH + ".bak").read_bytes() == b"old" and
+              not Path(mod.SAVE_PATH + ".tmp").exists(),
+              "unchanged snapshot leaves official and backup files unchanged")
 
     # A firmware without save_busy() must still save (backwards compatible).
     class LegacyGBA:
@@ -898,11 +910,48 @@ def test_save_guard():
 
         def save_write(self, path):
             self.writes += 1
+            Path(path).write_bytes(b"a" * 131072)
             return 131072
 
-    legacy = LegacyGBA()
-    mod.save_if_idle(legacy, "test")
-    check(legacy.writes == 1, "no save_busy() => save still happens")
+    with tempfile.TemporaryDirectory() as directory:
+        mod.SAVE_PATH = str(Path(directory) / "game.sav")
+        legacy = LegacyGBA()
+        check(mod.save_if_idle(legacy, "test") == 131072 and legacy.writes == 1,
+              "no save_busy() => save still happens")
+        prior = Path(mod.SAVE_PATH).read_bytes()
+        messages = []
+        mod.log = messages.append
+        for status in (-1, -3, -4, 0, None):
+            legacy.save_write = lambda path, status=status: status
+            check(mod.save_if_idle(legacy, "error") is None and
+                  Path(mod.SAVE_PATH).read_bytes() == prior and
+                  not any("提交并读回成功" in msg for msg in messages),
+                  "failure status %r never replaces old save or reports success" % status)
+        def short_write(path):
+            Path(path).write_bytes(b"short")
+            return 131072
+        legacy.save_write = short_write
+        check(mod.save_if_idle(legacy, "short") is None and
+              Path(mod.SAVE_PATH).read_bytes() == prior,
+              "claimed success with short file preserves previous save")
+        def changed_write(path):
+            Path(path).write_bytes(b"b" * 131072)
+            return 131072
+        legacy.save_write = changed_write
+        import os
+        real_rename = os.rename
+        def fail_commit(source, target):
+            if source.endswith(".tmp"):
+                raise OSError(5, "injected commit failure")
+            return real_rename(source, target)
+        with patch.object(os, "rename", fail_commit):
+            check(mod.save_if_idle(legacy, "rename fail") is None and
+                  Path(mod.SAVE_PATH).read_bytes() == prior,
+                  "failed rename after rotation restores old official save")
+        check(mod.save_if_idle(legacy, "second") == 131072 and
+              Path(mod.SAVE_PATH).read_bytes() == b"b" * 131072 and
+              Path(mod.SAVE_PATH + ".bak").read_bytes() == prior,
+              "second successful save replaces old progress and backs it up")
 
 
 def test_frame_loop_timing():
@@ -910,7 +959,8 @@ def test_frame_loop_timing():
 
     def run_loop(profile, frames=120, run_us=2000, start_us=0,
                  tick_period=None, startup_failure=None, controls=False,
-                 real_display=False, input_events=None, audio_enabled=True):
+                 real_display=False, input_events=None, audio_enabled=True,
+                 save_interval=0, save_results=None):
         # Execute the production function, suppressing the boot entry and
         # redirecting even its top-level log truncation to memory. No ROM,
         # save, log, or media device is opened by this harness.
@@ -981,7 +1031,7 @@ def test_frame_loop_timing():
 
             def save_load(self, path):
                 self.loaded_paths.append(path)
-                return 131072
+                return -3 if startup_failure == "save load status" else 131072
 
             def save_busy(self):
                 return 0
@@ -1215,9 +1265,17 @@ def test_frame_loop_timing():
         mod.AUDIO_ENABLE = audio_enabled
         mod.SHOW_CONTROLS = controls
         mod.FPS_LOG_EVERY = 120
-        mod.SAVE_EVERY_FRAMES = 0
+        mod.SAVE_EVERY_FRAMES = save_interval
         mod.ROM_PATH = "/test/in-memory/pokemon_emerald.gba"
         mod.SAVE_PATH = "/test/in-memory/pokemon_emerald.sav"
+        mod._save_exists = lambda path: path == mod.SAVE_PATH
+        save_attempts = []
+        def fake_save(gba, tag):
+            save_attempts.append((gba.frames, tag))
+            if tag == "定期" and save_results is not None:
+                return save_results.pop(0) if save_results else 131072
+            return gba.save_write(mod.SAVE_PATH)
+        mod.save_if_idle = fake_save
         fake_input = types.ModuleType("gba_input")
         fake_input.GBAInput = FakeInput
         fake_audio = types.ModuleType("gba_audio")
@@ -1237,8 +1295,18 @@ def test_frame_loop_timing():
                 "native_buffer_bytes": native_buffer_bytes,
                 "input_snapshots": input_snapshots,
                 "volume_overlays": volume_overlays,
+                "save_attempts": save_attempts,
                 "elapsed_us": clock.us - start_us}
 
+    retry = run_loop(False, frames=190, save_interval=120,
+                     save_results=[None, 131072])
+    check(retry["save_attempts"] == [(120, "定期"), (150, "定期"), (190, "退出")],
+          "busy/failed save retries after 30 frames rather than another interval")
+    failed_load = run_loop(False, startup_failure="save load status")
+    check(failed_load["gba"].frames == 0 and
+          failed_load["gba"].saved_paths == [] and
+          failed_load["gba"].unloads == 1,
+          "negative save-load status stops game before overwriting existing progress")
     runs = {}
     for profile in (True, False):
         result = run_loop(profile)

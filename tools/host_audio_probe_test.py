@@ -553,6 +553,7 @@ def test_boot_sequence():
                      "show_message": lambda *args: events.append("message"),
                      "selftest": lambda: events.append("selftest"),
                      "ROM_PATH": "/mock/test.gba", "SAVE_PATH": "/mock/test.sav",
+                     "_save_exists": lambda path: path == "/mock/test.sav",
                      "layout_params": lambda: (3, 0, 0, 40, 0),
                      "init_display": init_display, "SHOW_CONTROLS": True}
         exec(compile(extracted, "actual_boot_functions.py", "exec"), namespace)
